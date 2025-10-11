@@ -174,6 +174,7 @@ export default function LoginPage() {
           </CardContent>
         </Card>
 
+
         {/* Footer */}
         <div className="text-center text-xs text-muted-foreground">
           By signing in, you agree to our{" "}

@@ -1,6 +1,5 @@
-import type { NextConfig } from 'next';
-
-const nextConfig: NextConfig = {
+/** @type {import('next').NextConfig} */
+const nextConfig = {
   experimental: {
     serverComponentsExternalPackages: [],
   },
@@ -14,7 +13,8 @@ const nextConfig: NextConfig = {
     ],
   },
   env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
+    NEXT_PUBLIC_API_URL:
+      process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
     NEXT_PUBLIC_APP_NAME: 'AI Code Review Assistant',
     NEXT_PUBLIC_APP_VERSION: '1.0.0',
   },
@@ -24,7 +24,7 @@ const nextConfig: NextConfig = {
         source: '/api/:path*',
         destination: `${process.env.NEXT_PUBLIC_API_URL}/api/:path*`,
       },
-    ];
+    ]
   },
   typescript: {
     ignoreBuildErrors: false,
@@ -36,6 +36,6 @@ const nextConfig: NextConfig = {
   compiler: {
     removeConsole: process.env.NODE_ENV === 'production',
   },
-};
+}
 
-export default nextConfig;
+export default nextConfig
