@@ -51,3 +51,11 @@ api_router.include_router(
     prefix="/webhooks",
     tags=["Webhooks"]
 )
+
+# Health check endpoint
+@api_router.get("/health")
+async def health_check():
+    return {
+        "status": "healthy",
+        "version": "1.0.0"
+    }

@@ -43,11 +43,12 @@ sentence-transformers==2.2.2
 
 # Code Analysis
 tree-sitter==0.20.4
-tree-sitter-python==0.20.4
-tree-sitter-javascript==0.20.3
-tree-sitter-typescript==0.20.3
+tree-sitter-python==0.23.6
+tree-sitter-javascript==0.23.1
+tree-sitter-typescript==0.23.0
 libcst==1.1.0
 ast-decompiler==0.6.0
+
 
 # Git and Version Control
 GitPython==3.1.40

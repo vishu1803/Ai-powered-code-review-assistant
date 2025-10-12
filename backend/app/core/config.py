@@ -1,9 +1,9 @@
+from pydantic_settings import BaseSettings
+from pydantic import field_validator
 from typing import Optional, List, Any
-from pydantic import BaseSettings, validator, PostgresDsn
 from functools import lru_cache
 import secrets
 import os
-
 
 class Settings(BaseSettings):
     # API Configuration
@@ -12,48 +12,44 @@ class Settings(BaseSettings):
     VERSION: str = "1.0.0"
     DESCRIPTION: str = "AI-powered code review assistant for modern development teams"
     
+    # Environment
+    ENVIRONMENT: str = "development"
+    DEBUG: bool = True
+    
     # Security
-    SECRET_KEY: str = secrets.token_urlsafe(32)
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8  # 8 days
-    REFRESH_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 30  # 30 days
+    SECRET_KEY: str = "your-super-secret-key-change-in-production-minimum-32-characters"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 11520
+    REFRESH_TOKEN_EXPIRE_MINUTES: int = 43200
     ALGORITHM: str = "HS256"
     
     # CORS
     BACKEND_CORS_ORIGINS: List[str] = [
         "http://localhost:3000",
         "http://localhost:8000",
+        "http://127.0.0.1:3000",
         "https://localhost:3000",
         "https://localhost:8000",
     ]
     
-    @validator("BACKEND_CORS_ORIGINS", pre=True)
-    def assemble_cors_origins(cls, v: str | List[str]) -> List[str]:
+    @field_validator("BACKEND_CORS_ORIGINS", mode="before")
+    @classmethod
+    def assemble_cors_origins(cls, v):
         if isinstance(v, str) and not v.startswith("["):
             return [i.strip() for i in v.split(",")]
         elif isinstance(v, (list, str)):
             return v
         raise ValueError(v)
     
-    # Database
-    POSTGRES_SERVER: str
-    POSTGRES_USER: str
-    POSTGRES_PASSWORD: str
-    POSTGRES_DB: str
-    POSTGRES_PORT: str = "5432"
-    DATABASE_URL: Optional[PostgresDsn] = None
+    # Database - Direct URLs (matching your .env structure)
+    DATABASE_URL: str = "postgresql+asyncpg://postgres:password@localhost:5432/ai_code_review"
+    DATABASE_URL_SYNC: str = "postgresql://postgres:password@localhost:5432/ai_code_review"
     
-    @validator("DATABASE_URL", pre=True)
-    def assemble_db_connection(cls, v: Optional[str], values: dict[str, Any]) -> Any:
-        if isinstance(v, str):
-            return v
-        return PostgresDsn.build(
-            scheme="postgresql+asyncpg",
-            user=values.get("POSTGRES_USER"),
-            password=values.get("POSTGRES_PASSWORD"),
-            host=values.get("POSTGRES_SERVER"),
-            port=values.get("POSTGRES_PORT"),
-            path=f"/{values.get('POSTGRES_DB') or ''}",
-        )
+    # Required for backward compatibility (set defaults)
+    POSTGRES_SERVER: str = "localhost"
+    POSTGRES_USER: str = "postgres" 
+    POSTGRES_PASSWORD: str = "password"
+    POSTGRES_DB: str = "ai_code_review"
+    POSTGRES_PORT: str = "5432"
     
     # Redis Configuration
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -77,25 +73,27 @@ class Settings(BaseSettings):
     GITLAB_WEBHOOK_SECRET: Optional[str] = None
     
     # File Storage
-    UPLOAD_DIR: str = "/tmp/uploads"
+    UPLOAD_DIR: str = "./uploads"
     MAX_FILE_SIZE: int = 10 * 1024 * 1024  # 10MB
     
     # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "json"
     
-    # Environment
-    ENVIRONMENT: str = "development"
+    # CORS (from your .env)
+    ALLOWED_HOSTS: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000", "*"]
+    
+    # Testing
     TESTING: bool = False
     
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
-
+    model_config = {
+        "env_file": ".env",
+        "case_sensitive": True,
+        "extra": "ignore"
+    }
 
 @lru_cache()
 def get_settings() -> Settings:
     return Settings()
-
 
 settings = get_settings()
