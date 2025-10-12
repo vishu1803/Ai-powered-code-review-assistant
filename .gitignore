@@ -1,0 +1,9 @@
+# Ignore Python virtual environments
+venv/
+backend/venv/
+frontend/node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
