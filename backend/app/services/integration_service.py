@@ -1,6 +1,7 @@
 import logging
 from typing import Optional, Dict, Any, List
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 import httpx
 import re
 from urllib.parse import urlparse
@@ -39,14 +40,34 @@ class IntegrationService:
         provider: str,
         repository_id: str,
         webhook_url: str,
-        access_token: str
+        user_id: int,  # Updated to use user_id instead of access_token
     ) -> Optional[str]:
         """Setup webhook for repository."""
+        # Get user from database
+        result = await self.db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+        
+        if not user or not user.preferences:
+            logger.warning("User not found or no stored preferences for webhook setup")
+            return None
+        
         if provider == "github":
+            access_token = user.preferences.get('github_access_token')
+            if not access_token:
+                logger.warning("No GitHub access token found for webhook setup")
+                return None
             return await self._setup_github_webhook(repository_id, webhook_url, access_token)
         elif provider == "gitlab":
+            access_token = user.preferences.get('gitlab_access_token')
+            if not access_token:
+                logger.warning("No GitLab access token found for webhook setup")
+                return None
             return await self._setup_gitlab_webhook(repository_id, webhook_url, access_token)
         elif provider == "bitbucket":
+            access_token = user.preferences.get('bitbucket_access_token')
+            if not access_token:
+                logger.warning("No Bitbucket access token found for webhook setup")
+                return None
             return await self._setup_bitbucket_webhook(repository_id, webhook_url, access_token)
         else:
             logger.warning(f"Webhook setup not supported for provider: {provider}")
@@ -69,22 +90,224 @@ class IntegrationService:
             logger.warning(f"Webhook removal not supported for provider: {provider}")
             return False
     
+    async def get_user_repositories(
+        self,
+        provider: str,
+        user_id: int
+    ) -> List[Dict[str, Any]]:
+        """Get user repositories from the provider using stored access token."""
+        # Get user from database
+        result = await self.db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+        
+        if not user or not user.preferences:
+            raise ValueError("User not found or no stored preferences")
+        
+        if provider == "github":
+            # Get stored GitHub access token
+            github_token = user.preferences.get('github_access_token')
+            if not github_token:
+                raise ValueError("GitHub access token not found. Please re-authenticate with GitHub.")
+            
+            return await self._get_github_user_repositories(github_token)
+        else:
+            raise ValueError(f"Provider {provider} not supported for repository listing")
+    
+    async def get_repository_details(
+        self,
+        provider: str,
+        repository_id: str,
+        user_id: int
+    ) -> Dict[str, Any]:
+        """Get detailed information about a specific repository."""
+        # Get user from database
+        result = await self.db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+        
+        if not user or not user.preferences:
+            raise ValueError("User not found or no stored preferences")
+        
+        if provider == "github":
+            # Get stored GitHub access token
+            github_token = user.preferences.get('github_access_token')
+            if not github_token:
+                raise ValueError("GitHub access token not found. Please re-authenticate with GitHub.")
+            
+            return await self._get_github_repository_details(repository_id, github_token)
+        else:
+            raise ValueError(f"Provider {provider} not supported for repository details")
+
     async def get_repository_branches(
         self,
         provider: str,
         repository_id: str,
-        access_token: Optional[str] = None
+        user_id: int  # Added user_id parameter
     ) -> List[Dict[str, Any]]:
-        """Get repository branches."""
+        """Get repository branches using stored access token."""
+        # Get user from database
+        result = await self.db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+        
+        if not user or not user.preferences:
+            raise ValueError("User not found or no stored preferences")
+        
         if provider == "github":
-            return await self._get_github_branches(repository_id, access_token)
+            # Get stored GitHub access token
+            github_token = user.preferences.get('github_access_token')
+            if not github_token:
+                raise ValueError("GitHub access token not found. Please re-authenticate with GitHub.")
+            
+            return await self._get_github_branches(repository_id, github_token)
         elif provider == "gitlab":
-            return await self._get_gitlab_branches(repository_id, access_token)
+            gitlab_token = user.preferences.get('gitlab_access_token')
+            if not gitlab_token:
+                raise ValueError("GitLab access token not found. Please re-authenticate with GitLab.")
+            return await self._get_gitlab_branches(repository_id, gitlab_token)
         elif provider == "bitbucket":
-            return await self._get_bitbucket_branches(repository_id, access_token)
+            bitbucket_token = user.preferences.get('bitbucket_access_token')
+            if not bitbucket_token:
+                raise ValueError("Bitbucket access token not found. Please re-authenticate with Bitbucket.")
+            return await self._get_bitbucket_branches(repository_id, bitbucket_token)
         else:
             logger.warning(f"Branch fetching not supported for provider: {provider}")
             return []
+
+    async def _get_github_user_repositories(self, access_token: str) -> List[Dict[str, Any]]:
+        """Fetch user's GitHub repositories."""
+        headers = {
+            "Accept": "application/vnd.github.v3+json",
+            "Authorization": f"token {access_token}",
+            "User-Agent": "AI-Code-Review-Assistant"
+        }
+        
+        repositories = []
+        page = 1
+        per_page = 100  # GitHub's max per page
+        
+        try:
+            while True:
+                # Fetch both owned and member repositories
+                url = f"https://api.github.com/user/repos?page={page}&per_page={per_page}&sort=updated&affiliation=owner,collaborator"
+                
+                response = await self.session.get(url, headers=headers)
+                
+                if response.status_code == 401:
+                    raise ValueError("GitHub access token is invalid or expired")
+                elif response.status_code == 403:
+                    raise ValueError("GitHub API rate limit exceeded")
+                elif response.status_code != 200:
+                    raise ValueError(f"GitHub API error: {response.status_code} - {response.text}")
+                
+                repos_data = response.json()
+                
+                # If no more repositories, break
+                if not repos_data:
+                    break
+                
+                for repo in repos_data:
+                    repositories.append({
+                        "id": repo["id"],
+                        "name": repo["name"],
+                        "full_name": repo["full_name"],
+                        "description": repo.get("description"),
+                        "html_url": repo["html_url"],
+                        "clone_url": repo["clone_url"],
+                        "default_branch": repo["default_branch"],
+                        "language": repo.get("language"),
+                        "private": repo["private"],
+                        "size": repo.get("size", 0),
+                        "stargazers_count": repo.get("stargazers_count", 0),
+                        "watchers_count": repo.get("watchers_count", 0),
+                        "forks_count": repo.get("forks_count", 0),
+                        "open_issues_count": repo.get("open_issues_count", 0),
+                        "created_at": repo["created_at"],
+                        "updated_at": repo["updated_at"],
+                        "pushed_at": repo.get("pushed_at"),
+                        "owner": {
+                            "login": repo["owner"]["login"],
+                            "avatar_url": repo["owner"]["avatar_url"]
+                        },
+                        "permissions": repo.get("permissions", {}),
+                        "is_connected": False  # Will be set by the calling service
+                    })
+                
+                # If we got less than per_page, we've reached the end
+                if len(repos_data) < per_page:
+                    break
+                
+                page += 1
+                
+                # Safety limit to prevent infinite loops
+                if page > 100:  # Max 10,000 repos
+                    logger.warning(f"Hit pagination limit while fetching GitHub repositories")
+                    break
+            
+            logger.info(f"Fetched {len(repositories)} GitHub repositories")
+            return repositories
+            
+        except httpx.RequestError as e:
+            logger.error(f"Network error during GitHub repositories fetch: {e}")
+            raise ValueError("Network error connecting to GitHub")
+        except Exception as e:
+            logger.error(f"GitHub repositories fetch error: {e}")
+            raise
+
+    async def _get_github_repository_details(self, repository_id: str, access_token: str) -> Dict[str, Any]:
+        """Get detailed information about a specific GitHub repository by ID."""
+        headers = {
+            "Accept": "application/vnd.github.v3+json",
+            "Authorization": f"token {access_token}",
+            "User-Agent": "AI-Code-Review-Assistant"
+        }
+        
+        # First, we need to get the repository by ID
+        url = f"https://api.github.com/repositories/{repository_id}"
+        
+        try:
+            response = await self.session.get(url, headers=headers)
+            
+            if response.status_code == 401:
+                raise ValueError("GitHub access token is invalid or expired")
+            elif response.status_code == 403:
+                raise ValueError("GitHub API rate limit exceeded")
+            elif response.status_code == 404:
+                raise ValueError("Repository not found or access denied")
+            elif response.status_code != 200:
+                raise ValueError(f"GitHub API error: {response.status_code} - {response.text}")
+            
+            repo_data = response.json()
+            
+            return {
+                "id": repo_data["id"],
+                "name": repo_data["name"],
+                "full_name": repo_data["full_name"],
+                "description": repo_data.get("description"),
+                "html_url": repo_data["html_url"],
+                "clone_url": repo_data["clone_url"],
+                "default_branch": repo_data["default_branch"],
+                "language": repo_data.get("language"),
+                "private": repo_data["private"],
+                "size": repo_data.get("size", 0),
+                "stargazers_count": repo_data.get("stargazers_count", 0),
+                "watchers_count": repo_data.get("watchers_count", 0),
+                "forks_count": repo_data.get("forks_count", 0),
+                "open_issues_count": repo_data.get("open_issues_count", 0),
+                "created_at": repo_data["created_at"],
+                "updated_at": repo_data["updated_at"],
+                "pushed_at": repo_data.get("pushed_at"),
+                "owner": {
+                    "login": repo_data["owner"]["login"],
+                    "avatar_url": repo_data["owner"]["avatar_url"]
+                },
+                "permissions": repo_data.get("permissions", {})
+            }
+            
+        except httpx.RequestError as e:
+            logger.error(f"Network error during GitHub repository details fetch: {e}")
+            raise ValueError("Network error connecting to GitHub")
+        except Exception as e:
+            logger.error(f"GitHub repository details fetch error: {e}")
+            raise
     
     # GitHub Integration Methods
     async def _validate_github_repo(self, repository_url: str, access_token: Optional[str]) -> Dict[str, Any]:

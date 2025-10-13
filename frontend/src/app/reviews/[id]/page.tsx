@@ -17,7 +17,8 @@ import {
   FileText,
   Code,
   Shield,
-  BarChart3
+  BarChart3,
+  Home
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -30,11 +31,11 @@ import IssuesList from "@/components/reviews/issues-list"
 import CodeViewer from "@/components/reviews/code-viewer"
 import CommentsPanel from "@/components/reviews/comments-panel"
 import AISummary from "@/components/reviews/ai-summary"
-import { reviewsApi } from "@/lib/api/reviews"
 import { Review, Issue, Comment } from "@/lib/types/api"
 import { toast } from "sonner"
 import Link from "next/link"
 import { formatDateTime, formatRelativeTime } from "@/lib/utils"
+import apiClient from "@/lib/api/client"
 
 export default function ReviewDetailsPage() {
   const params = useParams()
@@ -46,7 +47,7 @@ export default function ReviewDetailsPage() {
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null)
   const [isPolling, setIsPolling] = useState(false)
 
-  // Fetch review details - FIX IS HERE
+  // Fetch review details
   const { 
     data: review, 
     isLoading: isLoadingReview, 
@@ -54,32 +55,55 @@ export default function ReviewDetailsPage() {
     refetch: refetchReview
   } = useQuery({
     queryKey: ['review', reviewId],
-    queryFn: () => reviewsApi.getReview(reviewId),
+    queryFn: async (): Promise<Review> => {
+      const data = await apiClient.get<Review>(`/reviews/${reviewId}`)
+      return data
+    },
     enabled: !!reviewId,
-   // refetchInterval: (data) => {
-      // Poll every 2 seconds if review is in progress
-   //   return data?.status === 'in_progress' ? 2000 : false
-  //  },
+    refetchInterval: (data) => {
+      // Poll every 3 seconds if review is in progress
+      return data?.status === 'in_progress' ? 3000 : false
+    },
   })
 
   // Fetch issues
   const { 
-    data: issues, 
+    data: issues = [], 
     isLoading: isLoadingIssues,
     refetch: refetchIssues
   } = useQuery({
     queryKey: ['review-issues', reviewId],
-    queryFn: () => reviewsApi.getReviewIssues(reviewId),
+    queryFn: async (): Promise<Issue[]> => {
+      try {
+        const data = await apiClient.get<Issue[]>(`/reviews/${reviewId}/issues`)
+        return data || []
+      } catch (error: any) {
+        if (error.response?.status === 404) {
+          return []
+        }
+        throw error
+      }
+    },
     enabled: !!reviewId && review?.status !== 'pending',
   })
 
   // Fetch comments
   const { 
-    data: comments,
+    data: comments = [],
     refetch: refetchComments
   } = useQuery({
     queryKey: ['review-comments', reviewId],
-    queryFn: () => reviewsApi.getReviewComments(reviewId),
+    queryFn: async (): Promise<Comment[]> => {
+      try {
+        const data = await apiClient.get<Comment[]>(`/reviews/${reviewId}/comments`)
+        return data || []
+      } catch (error: any) {
+        if (error.response?.status === 404) {
+          return []
+        }
+        throw error
+      }
+    },
     enabled: !!reviewId,
   })
 
@@ -87,7 +111,7 @@ export default function ReviewDetailsPage() {
   const checkProgress = useCallback(async () => {
     if (review?.status === 'in_progress') {
       try {
-        const progress = await reviewsApi.getAnalysisProgress(reviewId)
+        const progress = await apiClient.get(`/reviews/${reviewId}/progress`)
         // Update the review cache with new progress
         queryClient.setQueryData(['review', reviewId], (oldData: Review | undefined) => {
           if (!oldData) return oldData
@@ -106,7 +130,7 @@ export default function ReviewDetailsPage() {
 
   useEffect(() => {
     if (review?.status === 'in_progress') {
-      const interval = setInterval(checkProgress, 1000)
+      const interval = setInterval(checkProgress, 2000)
       setIsPolling(true)
       return () => {
         clearInterval(interval)
@@ -117,33 +141,36 @@ export default function ReviewDetailsPage() {
 
   const handleGenerateSummary = async () => {
     try {
-      await reviewsApi.generateSummary(reviewId)
+      await apiClient.post(`/reviews/${reviewId}/summary`)
       toast.success("AI summary generation started")
       setTimeout(() => refetchReview(), 2000)
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Error generating summary:', error)
       toast.error("Failed to generate summary")
     }
   }
 
   const handleIssueUpdate = async (issueId: number, updates: any) => {
     try {
-      await reviewsApi.updateIssue(issueId, updates)
+      await apiClient.patch(`/reviews/${reviewId}/issues/${issueId}`, updates)
       refetchIssues()
       toast.success("Issue updated")
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Error updating issue:', error)
       toast.error("Failed to update issue")
     }
   }
 
   const handleAddComment = async (content: string, issueId?: number) => {
     try {
-      await reviewsApi.addComment(reviewId, {
+      await apiClient.post(`/reviews/${reviewId}/comments`, {
         content,
         issue_id: issueId,
       })
       refetchComments()
       toast.success("Comment added")
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Error adding comment:', error)
       toast.error("Failed to add comment")
     }
   }
@@ -153,8 +180,20 @@ export default function ReviewDetailsPage() {
       <DashboardLayout>
         <div className="flex flex-col items-center justify-center h-64 text-center">
           <p className="text-lg font-medium text-destructive mb-2">Failed to load review</p>
-          <p className="text-muted-foreground mb-4">The review may have been deleted or you don't have access</p>
-          <Button onClick={() => router.back()}>Go Back</Button>
+          <p className="text-muted-foreground mb-4">
+            {reviewError?.response?.status === 404 
+              ? "Review not found or you don't have access" 
+              : "Please try refreshing the page"}
+          </p>
+          <div className="flex space-x-2">
+            <Button variant="outline" onClick={() => router.push('/reviews')}>
+              Back to Reviews
+            </Button>
+            <Button onClick={() => refetchReview()}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Retry
+            </Button>
+          </div>
         </div>
       </DashboardLayout>
     )
@@ -220,7 +259,7 @@ export default function ReviewDetailsPage() {
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        {/* Header */}
+        {/* Header with Navigation */}
         <div className="flex items-start justify-between">
           <div className="flex items-start space-x-4">
             <Button variant="ghost" size="icon" asChild>
@@ -259,6 +298,10 @@ export default function ReviewDetailsPage() {
           </div>
           
           <div className="flex items-center space-x-2">
+            <Button variant="outline" onClick={() => router.push('/reviews')}>
+              <Home className="h-4 w-4 mr-2" />
+              Reviews
+            </Button>
             <Button variant="outline" onClick={() => refetchReview()}>
               <RefreshCw className="h-4 w-4 mr-2" />
               Refresh
@@ -284,8 +327,21 @@ export default function ReviewDetailsPage() {
         </div>
 
         {/* Progress (if in progress) */}
-        {review.status === 'in_progress' && (
-          <ReviewProgress review={review} />
+        {review.status === 'in_progress' && review.progress !== undefined && (
+          <Card>
+            <CardContent className="p-6">
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span>Analysis Progress</span>
+                  <span>{Math.round(review.progress * 100)}%</span>
+                </div>
+                <Progress value={review.progress * 100} />
+                <p className="text-xs text-muted-foreground">
+                  {review.analyzed_files || 0} of {review.total_files || 0} files analyzed
+                </p>
+              </div>
+            </CardContent>
+          </Card>
         )}
 
         {/* Stats Overview */}
@@ -298,9 +354,9 @@ export default function ReviewDetailsPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{review.analyzed_files}</div>
+              <div className="text-2xl font-bold">{review.analyzed_files || 0}</div>
               <p className="text-xs text-muted-foreground">
-                of {review.total_files} total files
+                of {review.total_files || 0} total files
               </p>
             </CardContent>
           </Card>
@@ -313,9 +369,9 @@ export default function ReviewDetailsPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{review.total_issues}</div>
+              <div className="text-2xl font-bold">{review.total_issues || 0}</div>
               <p className="text-xs text-muted-foreground">
-                {review.critical_issues} critical
+                {review.critical_issues || 0} critical
               </p>
             </CardContent>
           </Card>
@@ -345,9 +401,9 @@ export default function ReviewDetailsPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{comments?.length || 0}</div>
+              <div className="text-2xl font-bold">{comments.length}</div>
               <p className="text-xs text-muted-foreground">
-                {issues?.filter(i => !i.is_resolved).length || 0} unresolved
+                {issues.filter(i => !i.is_resolved).length} unresolved
               </p>
             </CardContent>
           </Card>
@@ -358,11 +414,11 @@ export default function ReviewDetailsPage() {
           <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="issues">
-              Issues ({issues?.length || 0})
+              Issues ({issues.length})
             </TabsTrigger>
             <TabsTrigger value="code">Code</TabsTrigger>
             <TabsTrigger value="comments">
-              Comments ({comments?.length || 0})
+              Comments ({comments.length})
             </TabsTrigger>
             <TabsTrigger value="ai-summary">AI Summary</TabsTrigger>
           </TabsList>
@@ -419,7 +475,9 @@ export default function ReviewDetailsPage() {
                       </div>
                     ) : (
                       <p className="text-muted-foreground text-center py-8">
-                        No issues found. Great job! 🎉
+                        {review.status === 'completed' 
+                          ? "No issues found. Great job! 🎉" 
+                          : "Analysis in progress..."}
                       </p>
                     )}
                   </CardContent>
@@ -459,6 +517,11 @@ export default function ReviewDetailsPage() {
                         <Progress value={review.maintainability_score * 10} />
                       </div>
                     )}
+                    {!review.code_quality_score && !review.security_score && (
+                      <p className="text-muted-foreground text-sm">
+                        Quality metrics will appear after analysis completes
+                      </p>
+                    )}
                   </CardContent>
                 </Card>
 
@@ -484,36 +547,124 @@ export default function ReviewDetailsPage() {
           </TabsContent>
 
           <TabsContent value="issues">
-            <IssuesList
-              issues={issues || []}
-              loading={isLoadingIssues}
-              onIssueUpdate={handleIssueUpdate}
-              onIssueSelect={setSelectedIssue}
-              selectedIssue={selectedIssue}
-            />
+            {/* Issues List Component - Create a simple version if component doesn't exist */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Issues ({issues.length})</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {isLoadingIssues ? (
+                  <div className="space-y-4">
+                    {Array.from({ length: 3 }).map((_, i) => (
+                      <div key={i} className="space-y-2 p-4 border rounded">
+                        <div className="h-4 w-3/4 bg-muted animate-pulse rounded" />
+                        <div className="h-3 w-1/2 bg-muted animate-pulse rounded" />
+                      </div>
+                    ))}
+                  </div>
+                ) : issues.length > 0 ? (
+                  <div className="space-y-4">
+                    {issues.map((issue) => (
+                      <div key={issue.id} className="border rounded-lg p-4">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <h3 className="font-medium">{issue.title}</h3>
+                            <p className="text-sm text-muted-foreground mt-1">
+                              {issue.description}
+                            </p>
+                            <div className="flex items-center space-x-4 mt-2 text-xs text-muted-foreground">
+                              <span>{issue.file_path}:{issue.line_start}</span>
+                              <Badge variant="outline" className="text-xs">
+                                {issue.category}
+                              </Badge>
+                            </div>
+                          </div>
+                          <Badge 
+                            variant={issue.severity === 'critical' ? 'destructive' : 'outline'}
+                            className="ml-4"
+                          >
+                            {issue.severity}
+                          </Badge>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground text-center py-8">
+                    No issues found
+                  </p>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
 
           <TabsContent value="code">
-            <CodeViewer
-              review={review}
-              issues={issues || []}
-              selectedIssue={selectedIssue}
-              onIssueSelect={setSelectedIssue}
-            />
+            <Card>
+              <CardHeader>
+                <CardTitle>Code Analysis</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-muted-foreground text-center py-8">
+                  Code viewer will be available soon
+                </p>
+              </CardContent>
+            </Card>
           </TabsContent>
 
           <TabsContent value="comments">
-            <CommentsPanel
-              comments={comments || []}
-              onAddComment={handleAddComment}
-            />
+            <Card>
+              <CardHeader>
+                <CardTitle>Comments ({comments.length})</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {comments.length > 0 ? (
+                  <div className="space-y-4">
+                    {comments.map((comment) => (
+                      <div key={comment.id} className="border rounded-lg p-4">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <p>{comment.content}</p>
+                            <p className="text-xs text-muted-foreground mt-2">
+                              {formatRelativeTime(comment.created_at)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground text-center py-8">
+                    No comments yet
+                  </p>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
 
           <TabsContent value="ai-summary">
-            <AISummary
-              review={review}
-              onGenerate={handleGenerateSummary}
-            />
+            <Card>
+              <CardHeader>
+                <CardTitle>AI Summary</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {review.ai_summary ? (
+                  <div className="prose dark:prose-invert max-w-none">
+                    <p>{review.ai_summary}</p>
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <p className="text-muted-foreground mb-4">
+                      No AI summary available yet
+                    </p>
+                    {review.status === 'completed' && (
+                      <Button onClick={handleGenerateSummary}>
+                        Generate AI Summary
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
       </div>

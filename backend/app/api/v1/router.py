@@ -3,6 +3,30 @@ from app.api.v1 import auth, users, repositories, reviews, analytics, integratio
 
 api_router = APIRouter()
 
+# Root API endpoint (ADD THIS)
+@api_router.get("/")
+async def api_root():
+    return {
+        "message": "AI Code Review Assistant API v1",
+        "version": "1.0.0",
+        "status": "running",
+        "endpoints": {
+            "auth": "/api/v1/auth",
+            "users": "/api/v1/users",
+            "repositories": "/api/v1/repositories", 
+            "reviews": "/api/v1/reviews",
+            "analytics": "/api/v1/analytics",
+            "integrations": "/api/v1/integrations",
+            "webhooks": "/api/v1/webhooks",
+            "health": "/api/v1/health"
+        },
+        "docs": {
+            "swagger": "/api/v1/docs",
+            "redoc": "/api/v1/redoc",
+            "openapi": "/api/v1/openapi.json"
+        }
+    }
+
 # Authentication routes
 api_router.include_router(
     auth.router,

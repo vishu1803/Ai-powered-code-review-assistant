@@ -170,20 +170,43 @@ export const changePassword = async (currentPassword: string, newPassword: strin
 };
 
 // OAuth handlers
-export const initiateOAuthLogin = (provider: 'github' | 'gitlab' | 'bitbucket'): void => {
-  const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-  const redirectUrl = `${baseUrl}/api/v1/auth/oauth/${provider}`;
-  window.location.href = redirectUrl;
+export const initiateOAuthLogin = async (provider: 'github' | 'gitlab' | 'bitbucket'): Promise<void> => {
+  try {
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    
+    // Fetch the OAuth URL from backend
+    const response = await fetch(`${baseUrl}/api/v1/auth/oauth/${provider}`);
+    
+    if (!response.ok) {
+      throw new Error(`OAuth request failed: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    
+    if (data.auth_url) {
+      // Redirect user to the OAuth provider
+      window.location.href = data.auth_url;
+    } else {
+      throw new Error('No authorization URL received');
+    }
+  } catch (error: any) {
+    console.error(`OAuth login error for ${provider}:`, error);
+    toast.error(`Failed to connect to ${provider}. Please try again.`);
+  }
 };
 
 export const handleOAuthCallback = async (code: string, state: string, provider: string): Promise<{ user: User; tokens: Token }> => {
   try {
-    const response = await apiClient.get<{ user: User; tokens: Token }>(`/auth/oauth/${provider}/callback`, {
-      params: { code, state },
+    const response = await apiClient.post<Token>(`/auth/oauth/${provider}/callback`, {
+      code,
+      state
     });
 
-    const { user, tokens } = response;
+    const tokens = response;
     setAuthTokens(tokens);
+
+    // Get user profile after OAuth login
+    const user = await apiClient.get<User>('/users/me');
     setCurrentUser(user);
 
     toast.success(`Successfully logged in with ${provider}`);

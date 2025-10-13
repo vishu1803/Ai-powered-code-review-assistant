@@ -2,7 +2,6 @@ from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, validator
 from datetime import datetime
 
-
 class RepositoryBase(BaseModel):
     name: str
     full_name: str
@@ -12,7 +11,6 @@ class RepositoryBase(BaseModel):
     default_branch: str = "main"
     language: Optional[str] = None
     is_private: bool = False
-
 
 class RepositoryCreate(RepositoryBase):
     provider: str  # github, gitlab, bitbucket
@@ -25,7 +23,6 @@ class RepositoryCreate(RepositoryBase):
             raise ValueError(f'Provider must be one of: {allowed_providers}')
         return v
 
-
 class RepositoryUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
@@ -35,7 +32,6 @@ class RepositoryUpdate(BaseModel):
     auto_review: Optional[bool] = None
     review_rules: Optional[Dict[str, Any]] = None
     notification_settings: Optional[Dict[str, Any]] = None
-
 
 class RepositoryInDBBase(RepositoryBase):
     id: int
@@ -60,15 +56,21 @@ class RepositoryInDBBase(RepositoryBase):
     class Config:
         from_attributes = True
 
-
 class Repository(RepositoryInDBBase):
     pass
 
+# Simple review summary schema to avoid forward reference
+class ReviewSummary(BaseModel):
+    id: int
+    title: str
+    status: str
+    created_at: datetime
+    total_issues: int = 0
+    code_quality_score: Optional[float] = None
 
 class RepositoryWithStats(Repository):
-    recent_reviews: List["ReviewSummary"] = []
+    recent_reviews: List[ReviewSummary] = []
     quality_trend: List[Dict[str, Any]] = []
-
 
 # Connect Repository Schema
 class ConnectRepositoryRequest(BaseModel):
@@ -82,7 +84,6 @@ class ConnectRepositoryRequest(BaseModel):
         if v not in allowed_providers:
             raise ValueError(f'Provider must be one of: {allowed_providers}')
         return v
-
 
 class WebhookSetupRequest(BaseModel):
     repository_id: int

@@ -3,7 +3,8 @@
 import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import Link from "next/link"
-import { Plus, Search, Filter, Calendar, MoreHorizontal, Eye, Play } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { Plus, Search, Filter, Calendar, MoreHorizontal, Eye, Play, ArrowLeft, Home, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -30,58 +31,83 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import DashboardLayout from "@/components/layout/dashboard-layout"
-import { reviewsApi } from "@/lib/api/reviews"
 import { ReviewSummary } from "@/lib/types/api"
 import { formatDateTime, formatRelativeTime } from "@/lib/utils"
 import { cn } from "@/lib/utils"
+import apiClient from "@/lib/api/client"
+import { toast } from "sonner"
+import { useDebounce } from "@/lib/hooks/use-debounce"
 
 export default function ReviewsPage() {
+  const router = useRouter()
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [sortBy, setSortBy] = useState<string>('created_at')
+  
+  const debouncedSearch = useDebounce(searchQuery, 300)
 
-  const { data: reviews = [], isLoading } = useQuery({
-    queryKey: ['reviews', searchQuery, statusFilter, sortBy],
-    queryFn: async () => {
-      // Mock data for demonstration
-      const mockReviews: ReviewSummary[] = [
-        {
-          id: 1,
-          title: 'Feature: User Authentication System',
-          status: 'completed',
-          progress: 1.0,
-          total_issues: 12,
-          critical_issues: 2,
-          code_quality_score: 8.2,
-          created_at: '2024-10-10T09:30:00Z',
-          completed_at: '2024-10-10T11:45:00Z',
-          repository_id: 1,
-        },
-        {
-          id: 2,
-          title: 'API Endpoints Refactoring',
-          status: 'in_progress',
-          progress: 0.65,
-          total_issues: 8,
-          critical_issues: 1,
-          code_quality_score: 7.5,
-          created_at: '2024-10-11T14:20:00Z',
-          repository_id: 2,
-        },
-        {
-          id: 3,
-          title: 'Database Schema Updates',
-          status: 'pending',
-          progress: 0.0,
-          total_issues: 0,
-          critical_issues: 0,
-          created_at: '2024-10-11T16:10:00Z',
-          repository_id: 1,
-        },
-      ]
-      return mockReviews
+  const { 
+    data: reviews = [], 
+    isLoading, 
+    error, 
+    refetch 
+  } = useQuery({
+    queryKey: ['reviews', debouncedSearch, statusFilter, sortBy],
+    queryFn: async (): Promise<ReviewSummary[]> => {
+      try {
+        const params: any = {
+          search: debouncedSearch || undefined,
+          status: statusFilter !== 'all' ? statusFilter : undefined,
+          sort_by: sortBy,
+          limit: 100,
+        }
+
+        // Remove undefined values
+        Object.keys(params).forEach(key => {
+          if (params[key] === undefined) {
+            delete params[key]
+          }
+        })
+
+        const data = await apiClient.get<ReviewSummary[]>('/reviews', { params })
+        return data || []
+      } catch (error: any) {
+        console.error('Error fetching reviews:', error)
+        
+        if (error.response?.status === 404) {
+          // No reviews found - return empty array
+          return []
+        } else if (error.response?.status === 401) {
+          toast.error('Please log in to view reviews')
+          return []
+        }
+        
+        throw error
+      }
+    },
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    retry: (failureCount, error: any) => {
+      // Don't retry on 401 or 404
+      if (error?.response?.status === 401 || error?.response?.status === 404) {
+        return false
+      }
+      return failureCount < 2
     },
   })
+
+  const handleRefresh = async () => {
+    try {
+      await refetch()
+      toast.success("Reviews refreshed")
+    } catch (error: any) {
+      console.error('Error refreshing reviews:', error)
+      if (error?.response?.status === 401) {
+        toast.error("Please log in to refresh reviews")
+      } else {
+        toast.error("Failed to refresh reviews")
+      }
+    }
+  }
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -103,23 +129,60 @@ export default function ReviewsPage() {
     return 'text-red-600'
   }
 
+  // Filter and sort reviews locally if needed
+  const filteredReviews = reviews.filter(review => {
+    if (statusFilter !== 'all' && review.status !== statusFilter) return false
+    if (searchQuery && !review.title.toLowerCase().includes(searchQuery.toLowerCase())) return false
+    return true
+  })
+
+  if (error && error.response?.status !== 404) {
+    return (
+      <DashboardLayout>
+        <div className="flex flex-col items-center justify-center h-64 text-center">
+          <p className="text-lg font-medium text-destructive mb-2">Failed to load reviews</p>
+          <p className="text-muted-foreground mb-4">Please try refreshing the page</p>
+          <Button onClick={handleRefresh}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Retry
+          </Button>
+        </div>
+      </DashboardLayout>
+    )
+  }
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        {/* Header */}
+        {/* Header with Back Button */}
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Code Reviews</h1>
-            <p className="text-muted-foreground">
-              Track and manage your AI-powered code reviews
-            </p>
+          <div className="flex items-center space-x-4">
+            <Button variant="ghost" onClick={() => router.push('/dashboard')}>
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight">Code Reviews</h1>
+              <p className="text-muted-foreground">
+                Track and manage your AI-powered code reviews
+              </p>
+            </div>
           </div>
-          <Button asChild>
-            <Link href="/reviews/new">
-              <Plus className="h-4 w-4 mr-2" />
-              New Review
-            </Link>
-          </Button>
+          <div className="flex items-center space-x-2">
+            <Button variant="outline" onClick={() => router.push('/dashboard')}>
+              <Home className="mr-2 h-4 w-4" />
+              Dashboard
+            </Button>
+            <Button variant="outline" onClick={handleRefresh} disabled={isLoading}>
+              <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+            <Button asChild>
+              <Link href="/analysis">
+                <Plus className="h-4 w-4 mr-2" />
+                Start Analysis
+              </Link>
+            </Button>
+          </div>
         </div>
 
         {/* Filters */}
@@ -206,25 +269,43 @@ export default function ReviewsPage() {
                     </TableCell>
                   </TableRow>
                 ))
-              ) : reviews.length === 0 ? (
+              ) : filteredReviews.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} className="text-center py-12">
                     <div className="space-y-2">
                       <p className="text-lg font-medium">No reviews found</p>
                       <p className="text-muted-foreground">
-                        Create your first code review to get started
+                        {reviews.length === 0 
+                          ? "Start analyzing your repositories to see reviews here" 
+                          : searchQuery || statusFilter !== 'all' 
+                            ? "No reviews match your current filters"
+                            : "Create your first code review to get started"
+                        }
                       </p>
-                      <Button asChild className="mt-4">
-                        <Link href="/reviews/new">
-                          <Plus className="h-4 w-4 mr-2" />
-                          New Review
-                        </Link>
-                      </Button>
+                      <div className="flex justify-center space-x-2 mt-4">
+                        {searchQuery || statusFilter !== 'all' ? (
+                          <Button 
+                            variant="outline" 
+                            onClick={() => {
+                              setSearchQuery('')
+                              setStatusFilter('all')
+                            }}
+                          >
+                            Clear Filters
+                          </Button>
+                        ) : null}
+                        <Button asChild>
+                          <Link href="/analysis">
+                            <Plus className="h-4 w-4 mr-2" />
+                            Start Analysis
+                          </Link>
+                        </Button>
+                      </div>
                     </div>
                   </TableCell>
                 </TableRow>
               ) : (
-                reviews.map((review) => (
+                filteredReviews.map((review) => (
                   <TableRow key={review.id}>
                     <TableCell>
                       <div className="space-y-1">

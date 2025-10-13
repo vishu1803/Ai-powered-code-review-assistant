@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { ArrowLeft, Play, FileText, GitBranch, Settings } from "lucide-react"
+import { useQuery } from "@tanstack/react-query"
+import { ArrowLeft, Play, FileText, GitBranch, Settings, Home, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -20,12 +21,10 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import DashboardLayout from "@/components/layout/dashboard-layout"
-import { useRepositoryStore } from "@/lib/store/repository-store"
-import { reviewsApi } from "@/lib/api/reviews"
-import { repositoriesApi } from "@/lib/api/repositories"
 import { Repository } from "@/lib/types/api"
 import { toast } from "sonner"
 import Link from "next/link"
+import apiClient from "@/lib/api/client"
 
 interface ReviewFormData {
   title: string
@@ -43,7 +42,6 @@ interface ReviewFormData {
 export default function NewReviewPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const { repositories } = useRepositoryStore()
   
   const [formData, setFormData] = useState<ReviewFormData>({
     title: '',
@@ -61,6 +59,26 @@ export default function NewReviewPage() {
   const [availableBranches, setAvailableBranches] = useState<string[]>([])
   const [isLoadingBranches, setIsLoadingBranches] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // Fetch repositories using real API
+  const { 
+    data: repositories = [], 
+    isLoading: isLoadingRepos,
+    error: reposError 
+  } = useQuery({
+    queryKey: ['repositories'],
+    queryFn: async (): Promise<Repository[]> => {
+      try {
+        const data = await apiClient.get<Repository[]>('/repositories')
+        return data || []
+      } catch (error: any) {
+        if (error.response?.status === 404) {
+          return []
+        }
+        throw error
+      }
+    },
+  })
 
   // Pre-select repository from URL params
   useEffect(() => {
@@ -89,9 +107,10 @@ export default function NewReviewPage() {
   const loadBranches = async (repositoryId: number) => {
     setIsLoadingBranches(true)
     try {
-      const response = await repositoriesApi.getRepositoryBranches(repositoryId)
+      const response = await apiClient.get(`/repositories/${repositoryId}/branches`)
       setAvailableBranches(response.branches || [])
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Error loading branches:', error)
       toast.error("Failed to load branches")
       // Fallback to default branch
       setAvailableBranches([selectedRepository?.default_branch || 'main'])
@@ -124,19 +143,13 @@ export default function NewReviewPage() {
     setIsSubmitting(true)
     
     try {
-      // Create the review
-      const review = await reviewsApi.createReview({
+      // Create the review using real API
+      const reviewData = {
         title: formData.title,
         description: formData.description,
         repository_id: formData.repository_id,
         source_branch: formData.branch,
-      })
-
-      // Start analysis
-      const analysisRequest = {
-        repository_id: formData.repository_id,
-        branch: formData.branch,
-        commit_sha: formData.commit_sha,
+        analysis_type: formData.analysis_type,
         rules: [
           ...(formData.include_security ? ['security'] : []),
           ...(formData.include_performance ? ['performance'] : []),
@@ -145,13 +158,15 @@ export default function NewReviewPage() {
         ],
       }
 
-      await reviewsApi.startAnalysis(analysisRequest)
+      const review = await apiClient.post('/reviews', reviewData)
       
       toast.success("Review created and analysis started")
       router.push(`/reviews/${review.id}`)
       
-    } catch (error) {
-      toast.error("Failed to create review")
+    } catch (error: any) {
+      console.error('Error creating review:', error)
+      const message = error.response?.data?.detail || 'Failed to create review'
+      toast.error(message)
     } finally {
       setIsSubmitting(false)
     }
@@ -183,262 +198,338 @@ export default function NewReviewPage() {
     { id: 'dependencies', label: 'Dependencies', description: 'Check for outdated or vulnerable dependencies' },
   ]
 
+  // Handle error states
+  if (reposError) {
+    return (
+      <DashboardLayout>
+        <div className="flex flex-col items-center justify-center h-64 text-center">
+          <p className="text-lg font-medium text-destructive mb-2">Failed to load repositories</p>
+          <p className="text-muted-foreground mb-4">Please try refreshing the page</p>
+          <Button onClick={() => router.push('/repositories/connect')}>
+            Connect Repositories
+          </Button>
+        </div>
+      </DashboardLayout>
+    )
+  }
+
+  // Show empty state if no repositories
+  if (!isLoadingRepos && repositories.length === 0) {
+    return (
+      <DashboardLayout>
+        <div className="max-w-4xl mx-auto">
+          <div className="flex items-center space-x-4 mb-6">
+            <Button variant="ghost" size="icon" asChild>
+              <Link href="/analysis">
+                <ArrowLeft className="h-4 w-4" />
+              </Link>
+            </Button>
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight">New Code Review</h1>
+              <p className="text-muted-foreground">
+                Start an AI-powered analysis of your code repository
+              </p>
+            </div>
+          </div>
+          
+          <Card>
+            <CardContent className="flex flex-col items-center justify-center h-64 text-center">
+              <GitBranch className="h-16 w-16 text-muted-foreground/50 mb-4" />
+              <h3 className="text-lg font-medium mb-2">No Repositories Connected</h3>
+              <p className="text-muted-foreground mb-6 max-w-md">
+                You need to connect at least one repository before you can create a review.
+              </p>
+              <Button asChild size="lg">
+                <Link href="/repositories/connect">
+                  Connect Repository
+                </Link>
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </DashboardLayout>
+    )
+  }
+
   return (
     <DashboardLayout>
       <div className="max-w-4xl mx-auto space-y-6">
-        {/* Header */}
-        <div className="flex items-center space-x-4">
-          <Button variant="ghost" size="icon" asChild>
-            <Link href="/reviews">
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
-          </Button>
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">New Code Review</h1>
-            <p className="text-muted-foreground">
-              Start an AI-powered analysis of your code repository
-            </p>
+        {/* Header with Navigation */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-4">
+            <Button variant="ghost" size="icon" asChild>
+              <Link href="/analysis">
+                <ArrowLeft className="h-4 w-4" />
+              </Link>
+            </Button>
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight">New Code Review</h1>
+              <p className="text-muted-foreground">
+                Start an AI-powered analysis of your code repository
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center space-x-2">
+            <Button variant="outline" onClick={() => router.push('/dashboard')}>
+              <Home className="h-4 w-4 mr-2" />
+              Dashboard
+            </Button>
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Basic Information */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center space-x-2">
-                <FileText className="h-5 w-5" />
-                <span>Review Details</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Repository Selection */}
-              <div className="space-y-2">
-                <Label htmlFor="repository">Repository</Label>
-                <Select
-                  value={formData.repository_id?.toString() || ''}
-                  onValueChange={handleRepositoryChange}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a repository" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {repositories.map((repo) => (
-                      <SelectItem key={repo.id} value={repo.id.toString()}>
-                        <div className="flex items-center space-x-2">
-                          <span>{repo.provider === 'github' ? '🐙' : repo.provider === 'gitlab' ? '🦊' : '📁'}</span>
-                          <span>{repo.full_name}</span>
-                          {!repo.is_active && (
-                            <Badge variant="secondary" className="text-xs">Inactive</Badge>
-                          )}
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Branch Selection */}
-              {selectedRepository && (
+        {isLoadingRepos ? (
+          <div className="space-y-6">
+            <Card>
+              <CardContent className="p-6">
+                <div className="space-y-4">
+                  <div className="h-4 w-32 bg-muted animate-pulse rounded" />
+                  <div className="h-10 bg-muted animate-pulse rounded" />
+                  <div className="h-4 w-24 bg-muted animate-pulse rounded" />
+                  <div className="h-10 bg-muted animate-pulse rounded" />
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Basic Information */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <FileText className="h-5 w-5" />
+                  <span>Review Details</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {/* Repository Selection */}
                 <div className="space-y-2">
-                  <Label htmlFor="branch">Branch</Label>
+                  <Label htmlFor="repository">Repository</Label>
                   <Select
-                    value={formData.branch}
-                    onValueChange={(value) => setFormData(prev => ({ ...prev, branch: value }))}
+                    value={formData.repository_id?.toString() || ''}
+                    onValueChange={handleRepositoryChange}
                   >
                     <SelectTrigger>
-                      <SelectValue />
+                      <SelectValue placeholder="Select a repository" />
                     </SelectTrigger>
                     <SelectContent>
-                      {isLoadingBranches ? (
-                        <SelectItem value="" disabled>Loading branches...</SelectItem>
-                      ) : (
-                        availableBranches.map((branch) => (
-                          <SelectItem key={branch} value={branch}>
-                            <div className="flex items-center space-x-2">
-                              <GitBranch className="h-3 w-3" />
-                              <span>{branch}</span>
-                              {branch === selectedRepository.default_branch && (
-                                <Badge variant="outline" className="text-xs">default</Badge>
-                              )}
-                            </div>
-                          </SelectItem>
-                        ))
-                      )}
+                      {repositories.map((repo) => (
+                        <SelectItem key={repo.id} value={repo.id.toString()}>
+                          <div className="flex items-center space-x-2">
+                            <span>{repo.provider === 'github' ? '🐙' : repo.provider === 'gitlab' ? '🦊' : '📁'}</span>
+                            <span>{repo.full_name}</span>
+                            {!repo.is_active && (
+                              <Badge variant="secondary" className="text-xs">Inactive</Badge>
+                            )}
+                          </div>
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
-              )}
 
-              {/* Title */}
-              <div className="space-y-2">
-                <Label htmlFor="title">Title</Label>
-                <Input
-                  id="title"
-                  placeholder="Enter review title"
-                  value={formData.title}
-                  onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
-                  required
-                />
-              </div>
-
-              {/* Description */}
-              <div className="space-y-2">
-                <Label htmlFor="description">Description (Optional)</Label>
-                <Textarea
-                  id="description"
-                  placeholder="Describe the purpose of this review"
-                  value={formData.description}
-                  onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-                  rows={3}
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Analysis Configuration */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center space-x-2">
-                <Settings className="h-5 w-5" />
-                <span>Analysis Configuration</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Analysis Type */}
-              <div className="space-y-4">
-                <Label>Analysis Type</Label>
-                <div className="grid gap-4">
-                  {analysisTypes.map((type) => (
-                    <Card
-                      key={type.value}
-                      className={`cursor-pointer transition-all ${
-                        formData.analysis_type === type.value ? 'ring-2 ring-primary' : ''
-                      }`}
-                      onClick={() => setFormData(prev => ({ ...prev, analysis_type: type.value as any }))}
+                {/* Branch Selection */}
+                {selectedRepository && (
+                  <div className="space-y-2">
+                    <Label htmlFor="branch">Branch</Label>
+                    <Select
+                      value={formData.branch}
+                      onValueChange={(value) => setFormData(prev => ({ ...prev, branch: value }))}
                     >
-                      <CardContent className="p-4">
-                        <div className="flex items-start space-x-3">
-                          <div className="mt-0.5">
-                            <div className={`w-4 h-4 rounded-full border-2 ${
-                              formData.analysis_type === type.value
-                                ? 'bg-primary border-primary'
-                                : 'border-muted-foreground'
-                            }`} />
-                          </div>
-                          <div className="flex-1">
-                            <h4 className="font-medium">{type.label}</h4>
-                            <p className="text-sm text-muted-foreground">{type.description}</p>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {isLoadingBranches ? (
+                          <SelectItem value="" disabled>Loading branches...</SelectItem>
+                        ) : (
+                          availableBranches.map((branch) => (
+                            <SelectItem key={branch} value={branch}>
+                              <div className="flex items-center space-x-2">
+                                <GitBranch className="h-3 w-3" />
+                                <span>{branch}</span>
+                                {branch === selectedRepository.default_branch && (
+                                  <Badge variant="outline" className="text-xs">default</Badge>
+                                )}
+                              </div>
+                            </SelectItem>
+                          ))
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {/* Title */}
+                <div className="space-y-2">
+                  <Label htmlFor="title">Title</Label>
+                  <Input
+                    id="title"
+                    placeholder="Enter review title"
+                    value={formData.title}
+                    onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
+                    required
+                  />
                 </div>
-              </div>
 
-              <Separator />
+                {/* Description */}
+                <div className="space-y-2">
+                  <Label htmlFor="description">Description (Optional)</Label>
+                  <Textarea
+                    id="description"
+                    placeholder="Describe the purpose of this review"
+                    value={formData.description}
+                    onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+                    rows={3}
+                  />
+                </div>
+              </CardContent>
+            </Card>
 
-              {/* Analysis Options */}
-              <div className="space-y-4">
-                <Label>Analysis Options</Label>
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="flex items-center space-x-2">
-                    <Switch
-                      id="security"
-                      checked={formData.include_security}
-                      onCheckedChange={(checked) => 
-                        setFormData(prev => ({ ...prev, include_security: checked }))
-                      }
-                    />
-                    <Label htmlFor="security" className="flex-1">
-                      <div className="font-medium">Security Analysis</div>
-                      <div className="text-sm text-muted-foreground">
-                        Scan for security vulnerabilities and issues
-                      </div>
-                    </Label>
-                  </div>
-
-                  <div className="flex items-center space-x-2">
-                    <Switch
-                      id="performance"
-                      checked={formData.include_performance}
-                      onCheckedChange={(checked) => 
-                        setFormData(prev => ({ ...prev, include_performance: checked }))
-                      }
-                    />
-                    <Label htmlFor="performance" className="flex-1">
-                      <div className="font-medium">Performance Analysis</div>
-                      <div className="text-sm text-muted-foreground">
-                        Check for performance bottlenecks and optimizations
-                      </div>
-                    </Label>
-                  </div>
-
-                  <div className="flex items-center space-x-2">
-                    <Switch
-                      id="style"
-                      checked={formData.include_style}
-                      onCheckedChange={(checked) => 
-                        setFormData(prev => ({ ...prev, include_style: checked }))
-                      }
-                    />
-                    <Label htmlFor="style" className="flex-1">
-                      <div className="font-medium">Code Style</div>
-                      <div className="text-sm text-muted-foreground">
-                        Enforce coding standards and style guidelines
-                      </div>
-                    </Label>
+            {/* Analysis Configuration */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <Settings className="h-5 w-5" />
+                  <span>Analysis Configuration</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {/* Analysis Type */}
+                <div className="space-y-4">
+                  <Label>Analysis Type</Label>
+                  <div className="grid gap-4">
+                    {analysisTypes.map((type) => (
+                      <Card
+                        key={type.value}
+                        className={`cursor-pointer transition-all ${
+                          formData.analysis_type === type.value ? 'ring-2 ring-primary' : ''
+                        }`}
+                        onClick={() => setFormData(prev => ({ ...prev, analysis_type: type.value as any }))}
+                      >
+                        <CardContent className="p-4">
+                          <div className="flex items-start space-x-3">
+                            <div className="mt-0.5">
+                              <div className={`w-4 h-4 rounded-full border-2 ${
+                                formData.analysis_type === type.value
+                                  ? 'bg-primary border-primary'
+                                  : 'border-muted-foreground'
+                              }`} />
+                            </div>
+                            <div className="flex-1">
+                              <h4 className="font-medium">{type.label}</h4>
+                              <p className="text-sm text-muted-foreground">{type.description}</p>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
                   </div>
                 </div>
-              </div>
 
-              <Separator />
+                <Separator />
 
-              {/* Custom Rules */}
-              <div className="space-y-4">
-                <Label>Additional Rules</Label>
-                <div className="grid gap-3">
-                  {availableRules.map((rule) => (
-                    <div key={rule.id} className="flex items-center space-x-2">
-                      <Checkbox
-                        id={rule.id}
-                        checked={formData.custom_rules.includes(rule.id)}
-                        onCheckedChange={(checked) => {
-                          if (checked) {
-                            setFormData(prev => ({
-                              ...prev,
-                              custom_rules: [...prev.custom_rules, rule.id]
-                            }))
-                          } else {
-                            setFormData(prev => ({
-                              ...prev,
-                              custom_rules: prev.custom_rules.filter(r => r !== rule.id)
-                            }))
-                          }
-                        }}
+                {/* Analysis Options */}
+                <div className="space-y-4">
+                  <Label>Analysis Options</Label>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="flex items-center space-x-2">
+                      <Switch
+                        id="security"
+                        checked={formData.include_security}
+                        onCheckedChange={(checked) => 
+                          setFormData(prev => ({ ...prev, include_security: checked }))
+                        }
                       />
-                      <Label htmlFor={rule.id} className="flex-1 cursor-pointer">
-                        <div className="font-medium">{rule.label}</div>
-                        <div className="text-sm text-muted-foreground">{rule.description}</div>
+                      <Label htmlFor="security" className="flex-1">
+                        <div className="font-medium">Security Analysis</div>
+                        <div className="text-sm text-muted-foreground">
+                          Scan for security vulnerabilities and issues
+                        </div>
                       </Label>
                     </div>
-                  ))}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
 
-          {/* Actions */}
-          <div className="flex items-center justify-between">
-            <Button variant="outline" asChild>
-              <Link href="/reviews">Cancel</Link>
-            </Button>
-            <Button type="submit" disabled={!formData.repository_id || isSubmitting}>
-              <Play className="h-4 w-4 mr-2" />
-              {isSubmitting ? 'Starting Analysis...' : 'Start Review'}
-            </Button>
-          </div>
-        </form>
+                    <div className="flex items-center space-x-2">
+                      <Switch
+                        id="performance"
+                        checked={formData.include_performance}
+                        onCheckedChange={(checked) => 
+                          setFormData(prev => ({ ...prev, include_performance: checked }))
+                        }
+                      />
+                      <Label htmlFor="performance" className="flex-1">
+                        <div className="font-medium">Performance Analysis</div>
+                        <div className="text-sm text-muted-foreground">
+                          Check for performance bottlenecks and optimizations
+                        </div>
+                      </Label>
+                    </div>
+
+                    <div className="flex items-center space-x-2">
+                      <Switch
+                        id="style"
+                        checked={formData.include_style}
+                        onCheckedChange={(checked) => 
+                          setFormData(prev => ({ ...prev, include_style: checked }))
+                        }
+                      />
+                      <Label htmlFor="style" className="flex-1">
+                        <div className="font-medium">Code Style</div>
+                        <div className="text-sm text-muted-foreground">
+                          Enforce coding standards and style guidelines
+                        </div>
+                      </Label>
+                    </div>
+                  </div>
+                </div>
+
+                <Separator />
+
+                {/* Custom Rules */}
+                <div className="space-y-4">
+                  <Label>Additional Rules</Label>
+                  <div className="grid gap-3">
+                    {availableRules.map((rule) => (
+                      <div key={rule.id} className="flex items-center space-x-2">
+                        <Checkbox
+                          id={rule.id}
+                          checked={formData.custom_rules.includes(rule.id)}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              setFormData(prev => ({
+                                ...prev,
+                                custom_rules: [...prev.custom_rules, rule.id]
+                              }))
+                            } else {
+                              setFormData(prev => ({
+                                ...prev,
+                                custom_rules: prev.custom_rules.filter(r => r !== rule.id)
+                              }))
+                            }
+                          }}
+                        />
+                        <Label htmlFor={rule.id} className="flex-1 cursor-pointer">
+                          <div className="font-medium">{rule.label}</div>
+                          <div className="text-sm text-muted-foreground">{rule.description}</div>
+                        </Label>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Actions */}
+            <div className="flex items-center justify-between">
+              <Button variant="outline" asChild>
+                <Link href="/analysis">Cancel</Link>
+              </Button>
+              <Button type="submit" disabled={!formData.repository_id || isSubmitting}>
+                <Play className="h-4 w-4 mr-2" />
+                {isSubmitting ? 'Starting Analysis...' : 'Start Review'}
+              </Button>
+            </div>
+          </form>
+        )}
       </div>
     </DashboardLayout>
   )

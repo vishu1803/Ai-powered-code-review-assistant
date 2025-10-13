@@ -1,9 +1,24 @@
-# Ignore Python virtual environments
+# Python
 venv/
-backend/venv/
-frontend/node_modules/
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-.env
+
+# Node
+node_modules/
+.next/
+
+# System
+.DS_Store
+Thumbs.db
+
+# Build
+dist/
+build/
+
+# Large files
+*.dll
+*.lib
+*.pdb
+
+# .gitignore
+backend/.env
+backend/.env.example

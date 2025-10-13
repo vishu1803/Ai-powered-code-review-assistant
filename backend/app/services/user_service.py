@@ -13,7 +13,6 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-
 class UserService:
     """Comprehensive user management service."""
     
@@ -85,6 +84,10 @@ class UserService:
     async def get_by_email(self, email: str) -> Optional[User]:
         """Get user by email address."""
         try:
+            # Handle None email (for OAuth users with private emails)
+            if email is None:
+                return None
+            
             result = await self.db.execute(
                 select(User).where(User.email == email.lower())
             )
@@ -255,6 +258,7 @@ class UserService:
         username: str,
         full_name: Optional[str] = None,
         avatar_url: Optional[str] = None,
+        github_access_token: Optional[str] = None,  # NEW PARAMETER
     ) -> User:
         """Create or update user from OAuth provider."""
         try:
@@ -264,12 +268,22 @@ class UserService:
             if user:
                 # Update existing OAuth user
                 update_data = {
-                    'email': email.lower(),
                     'full_name': full_name or user.full_name,
                     'avatar_url': avatar_url or user.avatar_url,
                     'updated_at': datetime.now(timezone.utc),
                     'last_login': datetime.now(timezone.utc),
                 }
+                
+                # Only update email if it's provided and not None
+                if email is not None:
+                    update_data['email'] = email.lower()
+                
+                # Store GitHub access token if provided
+                if github_access_token and provider == "github":
+                    # Get current preferences and add the token
+                    current_prefs = user.preferences or {}
+                    current_prefs['github_access_token'] = github_access_token
+                    update_data['preferences'] = current_prefs
                 
                 await self.db.execute(
                     update(User).where(User.id == user.id).values(**update_data)
@@ -280,28 +294,48 @@ class UserService:
                 logger.info(f"Updated OAuth user: {updated_user.email} (Provider: {provider})")
                 return updated_user
             
-            # Check if user exists by email
-            user = await self.get_by_email(email)
-            if user:
-                # Link OAuth account to existing user
-                oauth_field = f"{provider}_id"
-                await self.db.execute(
-                    update(User)
-                    .where(User.id == user.id)
-                    .values(**{
+            # Check if user exists by email (only if email is provided)
+            if email is not None:
+                user = await self.get_by_email(email)
+                if user:
+                    # Link OAuth account to existing user
+                    oauth_field = f"{provider}_id"
+                    link_data = {
                         oauth_field: oauth_id,
                         'avatar_url': avatar_url or user.avatar_url,
                         'updated_at': datetime.now(timezone.utc),
                         'last_login': datetime.now(timezone.utc),
-                    })
-                )
-                await self.db.commit()
-                
-                updated_user = await self.get_by_id(user.id)
-                logger.info(f"Linked {provider} account to existing user: {updated_user.email}")
-                return updated_user
+                    }
+                    
+                    # Store GitHub access token if provided
+                    if github_access_token and provider == "github":
+                        current_prefs = user.preferences or {}
+                        current_prefs['github_access_token'] = github_access_token
+                        link_data['preferences'] = current_prefs
+                    
+                    await self.db.execute(
+                        update(User)
+                        .where(User.id == user.id)
+                        .values(**link_data)
+                    )
+                    await self.db.commit()
+                    
+                    updated_user = await self.get_by_id(user.id)
+                    logger.info(f"Linked {provider} account to existing user: {updated_user.email}")
+                    return updated_user
             
             # Create new OAuth user
+            # Generate email if not provided (for private GitHub emails)
+            if email is None:
+                email = f"{provider}_{oauth_id}@oauth.local"
+            
+            # Get default preferences
+            preferences = self._get_default_preferences()
+            
+            # Store GitHub access token if provided
+            if github_access_token and provider == "github":
+                preferences['github_access_token'] = github_access_token
+            
             user_data = {
                 'email': email.lower(),
                 'username': await self._generate_unique_username(username),
@@ -310,7 +344,7 @@ class UserService:
                 'hashed_password': get_password_hash(f"oauth_{oauth_id}_{provider}"),  # Dummy password
                 'is_active': True,
                 'is_verified': True,  # OAuth users are pre-verified
-                'preferences': self._get_default_preferences(),
+                'preferences': preferences,  # Updated preferences with token
                 'notification_settings': self._get_default_notification_settings(),
                 'last_login': datetime.now(timezone.utc),
             }
@@ -672,7 +706,6 @@ class UserService:
             'slack_notifications': False,
             'slack_webhook_url': None,
         }
-
 
 # User Profile Management Service
 class UserProfileService:

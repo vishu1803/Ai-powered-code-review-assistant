@@ -31,6 +31,8 @@ class Settings(BaseSettings):
         "https://localhost:8000",
     ]
     
+    BASE_URL: str = "http://localhost:8000"
+
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod
     def assemble_cors_origins(cls, v):

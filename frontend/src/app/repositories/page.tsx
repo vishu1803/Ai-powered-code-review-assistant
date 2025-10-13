@@ -31,6 +31,7 @@ import { Repository } from "@/lib/types/api"
 import { toast } from "sonner"
 import Link from "next/link"
 import { useDebounce } from "@/lib/hooks/use-debounce"
+import apiClient from "@/lib/api/client"
 
 type ViewMode = 'grid' | 'list'
 type SortOption = 'name' | 'created_at' | 'last_analysis' | 'quality_score'
@@ -54,142 +55,68 @@ export default function RepositoriesPage() {
   } = useQuery({
     queryKey: ['repositories', debouncedSearch, selectedProvider, selectedStatus, sortBy],
     queryFn: async () => {
-      const params: any = {
-        search: debouncedSearch || undefined,
-        provider: selectedProvider !== 'all' ? selectedProvider : undefined,
-        is_active: selectedStatus === 'active' ? true : selectedStatus === 'inactive' ? false : undefined,
-        limit: 100,
-      }
-
-      // Simulate repository data since we don't have real API yet
-      const mockRepositories: Repository[] = [
-        {
-          id: 1,
-          name: 'frontend-app',
-          full_name: 'my-org/frontend-app',
-          description: 'React-based frontend application with TypeScript',
-          url: 'https://github.com/my-org/frontend-app',
-          clone_url: 'https://github.com/my-org/frontend-app.git',
-          default_branch: 'main',
-          language: 'TypeScript',
-          size: 1024,
-          is_private: false,
-          is_active: true,
-          is_archived: false,
-          provider: 'github',
-          external_id: '12345',
-          webhook_id: 'wh_123',
-          analysis_enabled: true,
-          auto_review: true,
-          review_rules: {},
-          notification_settings: {},
-          total_reviews: 15,
-          total_issues: 42,
-          avg_review_time: 25,
-          created_at: '2024-01-15T10:00:00Z',
-          updated_at: '2024-10-10T15:30:00Z',
-          last_analysis: '2024-10-10T14:20:00Z',
-          owner_id: 1,
-        },
-        {
-          id: 2,
-          name: 'backend-api',
-          full_name: 'my-org/backend-api',
-          description: 'FastAPI backend with PostgreSQL database',
-          url: 'https://github.com/my-org/backend-api',
-          clone_url: 'https://github.com/my-org/backend-api.git',
-          default_branch: 'develop',
-          language: 'Python',
-          size: 2048,
-          is_private: true,
-          is_active: true,
-          is_archived: false,
-          provider: 'github',
-          external_id: '12346',
-          webhook_id: 'wh_124',
-          analysis_enabled: true,
-          auto_review: false,
-          review_rules: {},
-          notification_settings: {},
-          total_reviews: 28,
-          total_issues: 18,
-          avg_review_time: 32,
-          created_at: '2024-02-01T09:15:00Z',
-          updated_at: '2024-10-11T08:45:00Z',
-          last_analysis: '2024-10-11T07:30:00Z',
-          owner_id: 1,
-        },
-        {
-          id: 3,
-          name: 'mobile-client',
-          full_name: 'my-org/mobile-client',
-          description: 'React Native mobile application',
-          url: 'https://gitlab.com/my-org/mobile-client',
-          clone_url: 'https://gitlab.com/my-org/mobile-client.git',
-          default_branch: 'main',
-          language: 'JavaScript',
-          size: 512,
-          is_private: false,
-          is_active: false,
-          is_archived: true,
-          provider: 'gitlab',
-          external_id: '54321',
-          analysis_enabled: false,
-          auto_review: true,
-          review_rules: {},
-          notification_settings: {},
-          total_reviews: 8,
-          total_issues: 23,
-          avg_review_time: 18,
-          created_at: '2024-03-20T14:30:00Z',
-          updated_at: '2024-09-15T11:20:00Z',
-          last_analysis: '2024-09-10T16:45:00Z',
-          owner_id: 1,
+      try {
+        const params: any = {
+          search: debouncedSearch || undefined,
+          provider: selectedProvider !== 'all' ? selectedProvider : undefined,
+          is_active: selectedStatus === 'active' ? true : selectedStatus === 'inactive' ? false : undefined,
+          limit: 100,
         }
-      ]
 
-      // Filter based on search and filters
-      let filtered = mockRepositories
+        // Remove undefined values
+        Object.keys(params).forEach(key => {
+          if (params[key] === undefined) {
+            delete params[key]
+          }
+        })
 
-      if (debouncedSearch) {
-        const query = debouncedSearch.toLowerCase()
-        filtered = filtered.filter(repo => 
-          repo.name.toLowerCase().includes(query) ||
-          repo.description?.toLowerCase().includes(query) ||
-          repo.language?.toLowerCase().includes(query)
-        )
-      }
+        // Call the real API
+        const data = await apiClient.get<Repository[]>('/repositories', { params })
 
-      if (selectedProvider !== 'all') {
-        filtered = filtered.filter(repo => repo.provider === selectedProvider)
-      }
-
-      if (selectedStatus === 'active') {
-        filtered = filtered.filter(repo => repo.is_active)
-      } else if (selectedStatus === 'inactive') {
-        filtered = filtered.filter(repo => !repo.is_active)
-      }
-
-      // Sort
-      filtered.sort((a, b) => {
-        switch (sortBy) {
-          case 'name':
-            return a.name.localeCompare(b.name)
-          case 'created_at':
-            return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-          case 'last_analysis':
-            if (!a.last_analysis && !b.last_analysis) return 0
-            if (!a.last_analysis) return 1
-            if (!b.last_analysis) return -1
-            return new Date(b.last_analysis).getTime() - new Date(a.last_analysis).getTime()
-          default:
-            return 0
+        // Sort the data locally since the API might not support all sort options
+        if (data && Array.isArray(data)) {
+          const sorted = [...data].sort((a, b) => {
+            switch (sortBy) {
+              case 'name':
+                return a.name.localeCompare(b.name)
+              case 'created_at':
+                return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+              case 'last_analysis':
+                if (!a.last_analysis && !b.last_analysis) return 0
+                if (!a.last_analysis) return 1
+                if (!b.last_analysis) return -1
+                return new Date(b.last_analysis).getTime() - new Date(a.last_analysis).getTime()
+              default:
+                return 0
+            }
+          })
+          return sorted
         }
-      })
 
-      return filtered
+        return []
+      } catch (error: any) {
+        // If there's an error (like no repositories connected), return empty array
+        console.error('Error fetching repositories:', error)
+        
+        // Show a more user-friendly message for specific errors
+        if (error.response?.status === 404) {
+          return []
+        } else if (error.response?.status === 401) {
+          toast.error('Please log in to view repositories')
+          return []
+        }
+        
+        throw error
+      }
     },
     staleTime: 5 * 60 * 1000,
+    retry: (failureCount, error: any) => {
+      // Don't retry on 401 or 404
+      if (error?.response?.status === 401 || error?.response?.status === 404) {
+        return false
+      }
+      return failureCount < 2
+    },
   })
 
   useEffect(() => {
@@ -206,8 +133,13 @@ export default function RepositoriesPage() {
     try {
       await refetch()
       toast.success("Repositories refreshed")
-    } catch (error) {
-      toast.error("Failed to refresh repositories")
+    } catch (error: any) {
+      console.error('Error refreshing repositories:', error)
+      if (error?.response?.status === 401) {
+        toast.error("Please log in to refresh repositories")
+      } else {
+        toast.error("Failed to refresh repositories")
+      }
     }
   }
 
@@ -218,14 +150,21 @@ export default function RepositoriesPage() {
     setRepositories(updatedRepos)
   }
 
-  const handleRepositoryDelete = (repositoryId: number) => {
-    removeRepository(repositoryId)
+  const handleRepositoryDelete = async (repositoryId: number) => {
+    try {
+      await apiClient.delete(`/repositories/${repositoryId}`)
+      removeRepository(repositoryId)
+      toast.success("Repository disconnected successfully")
+    } catch (error: any) {
+      console.error('Error deleting repository:', error)
+      toast.error("Failed to disconnect repository")
+    }
   }
 
   const activeCount = repositories.filter(r => r.is_active).length
   const totalCount = repositories.length
 
-  if (error) {
+  if (error && error.response?.status !== 404) {
     return (
       <DashboardLayout>
         <div className="flex flex-col items-center justify-center h-64 text-center">
@@ -293,10 +232,10 @@ export default function RepositoriesPage() {
           </Card>
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Reviews Today</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground">Connected</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">12</div>
+              <div className="text-2xl font-bold">{totalCount}</div>
             </CardContent>
           </Card>
         </div>
@@ -403,7 +342,7 @@ export default function RepositoriesPage() {
                   <p className="text-muted-foreground">
                     {searchQuery || selectedProvider !== 'all' || selectedStatus !== 'all'
                       ? "No repositories match your current filters"
-                      : "Get started by connecting your first repository"
+                      : "Get started by connecting your first repository from GitHub"
                     }
                   </p>
                 </div>

@@ -13,7 +13,6 @@ from app.models.schemas.repository import RepositoryCreate, RepositoryUpdate
 
 logger = logging.getLogger(__name__)
 
-
 class RepositoryService:
     """Comprehensive repository management service."""
     
@@ -88,6 +87,28 @@ class RepositoryService:
             return result.scalar_one_or_none()
         except Exception as e:
             logger.error(f"Error getting repository by ID and owner: {e}")
+            return None
+
+    async def get_by_external_id(
+        self,
+        external_id: str,
+        provider: str,
+        user_id: int
+    ) -> Optional[Repository]:
+        """Get repository by external ID, provider, and user."""
+        try:
+            result = await self.db.execute(
+                select(Repository).where(
+                    and_(
+                        Repository.external_id == external_id,
+                        Repository.provider == provider,
+                        Repository.owner_id == user_id
+                    )
+                )
+            )
+            return result.scalar_one_or_none()
+        except Exception as e:
+            logger.error(f"Error getting repository by external ID {external_id}: {e}")
             return None
     
     async def get_user_repositories(

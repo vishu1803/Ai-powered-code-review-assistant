@@ -30,41 +30,45 @@ interface StatsOverviewProps {
 }
 
 export default function StatsOverview({ stats, loading = false }: StatsOverviewProps) {
+  // Safely calculate rates with fallbacks
   const completionRate = stats.total_reviews > 0 ? (stats.completed_reviews / stats.total_reviews) * 100 : 0
   const criticalIssueRate = stats.total_issues > 0 ? (stats.critical_issues / stats.total_issues) * 100 : 0
+  const repositoryActiveRate = stats.total_repositories > 0 ? (stats.active_repositories / stats.total_repositories) * 100 : 0
   
   const statCards = [
     {
       title: "Total Repositories",
       value: stats.total_repositories,
-      subValue: `${stats.active_repositories} active`,
+      subValue: stats.total_repositories > 0 ? `${stats.active_repositories} active` : "Connect repositories",
       icon: GitBranch,
-      trend: stats.active_repositories > stats.total_repositories * 0.8 ? "up" : "down",
-      color: "blue",
+      trend: repositoryActiveRate > 80 ? "up" : repositoryActiveRate > 0 ? "neutral" : "down",
+      color: stats.total_repositories > 0 ? "blue" : "gray",
     },
     {
       title: "Code Reviews",
       value: stats.total_reviews,
-      subValue: `${completionRate.toFixed(1)}% completed`,
+      subValue: stats.total_reviews > 0 ? `${completionRate.toFixed(1)}% completed` : "Start your first review",
       icon: FileText,
-      trend: completionRate > 80 ? "up" : "down",
-      color: "green",
+      trend: completionRate > 80 ? "up" : completionRate > 0 ? "neutral" : "down",
+      color: stats.total_reviews > 0 ? "green" : "gray",
     },
     {
       title: "Issues Found",
       value: stats.total_issues,
-      subValue: `${stats.critical_issues} critical`,
+      subValue: stats.total_issues > 0 ? `${stats.critical_issues} critical` : "No issues yet",
       icon: AlertTriangle,
-      trend: criticalIssueRate > 20 ? "down" : "up",
-      color: stats.critical_issues > 0 ? "red" : "yellow",
+      trend: stats.critical_issues === 0 ? "up" : criticalIssueRate > 20 ? "down" : "neutral",
+      color: stats.critical_issues > 0 ? "red" : stats.total_issues > 0 ? "yellow" : "gray",
     },
     {
       title: "Quality Score",
-      value: `${stats.average_quality_score.toFixed(1)}/10`,
-      subValue: stats.average_quality_score > 8 ? "Excellent" : stats.average_quality_score > 6 ? "Good" : "Needs work",
+      value: stats.average_quality_score > 0 ? `${stats.average_quality_score.toFixed(1)}/10` : "N/A",
+      subValue: stats.average_quality_score > 0 
+        ? (stats.average_quality_score > 8 ? "Excellent" : stats.average_quality_score > 6 ? "Good" : "Needs improvement")
+        : "Run analysis to see score",
       icon: Shield,
-      trend: stats.average_quality_score > 7 ? "up" : "down",
-      color: stats.average_quality_score > 7 ? "green" : "yellow",
+      trend: stats.average_quality_score > 7 ? "up" : stats.average_quality_score > 0 ? "neutral" : "down",
+      color: stats.average_quality_score > 7 ? "green" : stats.average_quality_score > 0 ? "yellow" : "gray",
     },
   ]
 
@@ -92,6 +96,7 @@ export default function StatsOverview({ stats, loading = false }: StatsOverviewP
       {statCards.map((stat, index) => {
         const IconComponent = stat.icon
         const isPositiveTrend = stat.trend === "up"
+        const isNeutralTrend = stat.trend === "neutral"
         
         return (
           <Card key={index}>
@@ -106,6 +111,7 @@ export default function StatsOverview({ stats, loading = false }: StatsOverviewP
                   "bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-300": stat.color === "green",
                   "bg-yellow-100 text-yellow-600 dark:bg-yellow-900 dark:text-yellow-300": stat.color === "yellow",
                   "bg-red-100 text-red-600 dark:bg-red-900 dark:text-red-300": stat.color === "red",
+                  "bg-gray-100 text-gray-600 dark:bg-gray-900 dark:text-gray-300": stat.color === "gray",
                 }
               )}>
                 <IconComponent className="h-4 w-4" />
@@ -115,10 +121,12 @@ export default function StatsOverview({ stats, loading = false }: StatsOverviewP
               <div className="text-2xl font-bold">{stat.value}</div>
               <div className="flex items-center space-x-2 text-xs text-muted-foreground">
                 <span>{stat.subValue}</span>
-                {isPositiveTrend ? (
-                  <TrendingUp className="h-3 w-3 text-green-500" />
-                ) : (
-                  <TrendingDown className="h-3 w-3 text-red-500" />
+                {!isNeutralTrend && (
+                  isPositiveTrend ? (
+                    <TrendingUp className="h-3 w-3 text-green-500" />
+                  ) : (
+                    <TrendingDown className="h-3 w-3 text-red-500" />
+                  )
                 )}
               </div>
             </CardContent>

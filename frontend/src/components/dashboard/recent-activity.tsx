@@ -11,7 +11,9 @@ import {
   GitBranch, 
   FileText,
   ExternalLink,
-  Clock
+  Clock,
+  Play,
+  Plus
 } from "lucide-react"
 import Link from "next/link"
 
@@ -48,7 +50,7 @@ export default function RecentActivity({ activities, loading = false }: RecentAc
       case 'issue_resolved':
         return <AlertTriangle className="h-4 w-4 text-yellow-500" />
       case 'analysis_started':
-        return <FileText className="h-4 w-4 text-purple-500" />
+        return <Play className="h-4 w-4 text-purple-500" />
       default:
         return <Clock className="h-4 w-4 text-muted-foreground" />
     }
@@ -59,7 +61,7 @@ export default function RecentActivity({ activities, loading = false }: RecentAc
       case 'review_completed':
         return <Badge variant="outline" className="text-green-600">Completed</Badge>
       case 'repository_added':
-        return <Badge variant="outline" className="text-blue-600">New Repo</Badge>
+        return <Badge variant="outline" className="text-blue-600">Connected</Badge>
       case 'issue_resolved':
         return (
           <Badge 
@@ -74,7 +76,7 @@ export default function RecentActivity({ activities, loading = false }: RecentAc
           </Badge>
         )
       case 'analysis_started':
-        return <Badge variant="outline" className="text-purple-600">Analyzing</Badge>
+        return <Badge variant="outline" className="text-purple-600">In Progress</Badge>
       default:
         return null
     }
@@ -112,8 +114,9 @@ export default function RecentActivity({ activities, loading = false }: RecentAc
             <Clock className="h-5 w-5" />
             <span>Recent Activity</span>
           </div>
+          {/* Updated: Point to reviews instead of non-existent /activity page */}
           <Button variant="ghost" size="sm" asChild>
-            <Link href="/activity">View All</Link>
+            <Link href="/reviews">View All</Link>
           </Button>
         </CardTitle>
       </CardHeader>
@@ -121,13 +124,27 @@ export default function RecentActivity({ activities, loading = false }: RecentAc
         {activities.length === 0 ? (
           <div className="text-center py-8 text-muted-foreground">
             <Clock className="h-12 w-12 mx-auto mb-4 opacity-50" />
-            <p>No recent activity</p>
-            <p className="text-sm">Start by connecting a repository or running a code review</p>
+            <p className="font-medium">No recent activity</p>
+            <p className="text-sm mt-1">Get started with your first repository</p>
+            <div className="flex justify-center space-x-2 mt-4">
+              <Button size="sm" variant="outline" asChild>
+                <Link href="/repositories/connect">
+                  <Plus className="h-3 w-3 mr-2" />
+                  Connect Repository
+                </Link>
+              </Button>
+              <Button size="sm" asChild>
+                <Link href="/analysis">
+                  <Play className="h-3 w-3 mr-2" />
+                  Start Analysis
+                </Link>
+              </Button>
+            </div>
           </div>
         ) : (
           <div className="space-y-4">
             {activities.map((activity) => (
-              <div key={activity.id} className="flex items-start space-x-4 p-3 rounded-lg hover:bg-muted/50 transition-colors">
+              <div key={activity.id} className="flex items-start space-x-4 p-3 rounded-lg hover:bg-muted/50 transition-colors group">
                 <div className="flex-shrink-0 mt-1">
                   {getActivityIcon(activity.type)}
                 </div>
@@ -135,7 +152,9 @@ export default function RecentActivity({ activities, loading = false }: RecentAc
                 <div className="flex-1 min-w-0">
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
-                      <p className="text-sm font-medium">{activity.title}</p>
+                      <p className="text-sm font-medium group-hover:text-primary transition-colors">
+                        {activity.title}
+                      </p>
                       <p className="text-sm text-muted-foreground mt-1">{activity.description}</p>
                       
                       {activity.metadata?.repository && (
@@ -180,6 +199,18 @@ export default function RecentActivity({ activities, loading = false }: RecentAc
                 </div>
               </div>
             ))}
+            
+            {/* Show view more if there are activities */}
+            {activities.length > 0 && (
+              <div className="pt-2 border-t">
+                <Button variant="ghost" size="sm" className="w-full" asChild>
+                  <Link href="/reviews">
+                    View all activity
+                    <ExternalLink className="h-3 w-3 ml-2" />
+                  </Link>
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </CardContent>

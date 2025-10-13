@@ -51,14 +51,22 @@ export function truncateText(text: string, maxLength: number): string {
   return text.slice(0, maxLength) + "..."
 }
 
-export function getInitials(name: string): string {
+export function getInitials(name: string | null | undefined): string {
+  // Handle null, undefined, or empty string cases
+  if (!name || typeof name !== 'string' || name.trim() === "") {
+    return "AI" // Default fallback initials
+  }
+  
   return name
+    .trim()
     .split(" ")
+    .filter(part => part.length > 0) // Filter out empty parts
     .map((n) => n[0])
     .join("")
     .toUpperCase()
     .slice(0, 2)
 }
+
 
 export function generateId(): string {
   return Math.random().toString(36).substr(2, 9)

@@ -55,13 +55,13 @@ const sidebarItems: SidebarItem[] = [
     icon: Code2,
   },
   {
-    title: "Security",
-    href: "/security",
+    title: "Security", 
+    href: "/analysis", // FIXED: Changed from "/security" to "/analysis"
     icon: Shield,
   },
   {
     title: "Analytics",
-    href: "/analytics",
+    href: "/analysis", // FIXED: Changed from "/analytics" to "/analysis" 
     icon: BarChart3,
   },
   {
@@ -119,6 +119,21 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     }
   }
 
+  const handleNewReview = () => {
+    // Navigate to analysis page to start new analysis
+    router.push('/analysis?tab=new-analysis')
+  }
+
+  const handleSearch = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      const query = e.currentTarget.value
+      if (query.trim()) {
+        // Navigate to repositories with search query
+        router.push(`/repositories?search=${encodeURIComponent(query.trim())}`)
+      }
+    }
+  }
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -162,11 +177,14 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           {/* Navigation */}
           <nav className="flex-1 px-4 py-6 space-y-2">
             {sidebarItems.map((item) => {
-              const isActive = pathname === item.href || pathname.startsWith(item.href + "/")
+              const isActive = pathname === item.href || 
+                             pathname.startsWith(item.href + "/") ||
+                             // Special handling for analysis page variants
+                             (item.href === "/analysis" && (pathname === "/security" || pathname === "/analytics"))
               
               return (
                 <Link
-                  key={item.href}
+                  key={item.title + item.href}
                   href={item.href}
                   className={cn(
                     "flex items-center space-x-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
@@ -210,6 +228,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 size="icon"
                 onClick={handleLogout}
                 className="h-8 w-8"
+                title="Logout"
               >
                 <User className="h-4 w-4" />
               </Button>
@@ -238,27 +257,31 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               <Input
                 placeholder="Search repositories, reviews..."
                 className="pl-10"
+                onKeyDown={handleSearch}
               />
             </div>
           </div>
 
           <div className="flex items-center space-x-4">
             {/* Quick Actions */}
-            <Button size="sm">
+            <Button size="sm" onClick={handleNewReview}>
               <Plus className="h-4 w-4 mr-2" />
-              New Review
+              New Analysis
             </Button>
 
             {/* Notifications */}
             <Button variant="ghost" size="icon" className="relative">
               <Bell className="h-5 w-5" />
-              <span className="absolute -top-1 -right-1 h-4 w-4 bg-destructive text-destructive-foreground text-xs rounded-full flex items-center justify-center">
-                3
-              </span>
+              {/* Hide notification badge for now since we don't have real notifications yet */}
+              {false && (
+                <span className="absolute -top-1 -right-1 h-4 w-4 bg-destructive text-destructive-foreground text-xs rounded-full flex items-center justify-center">
+                  3
+                </span>
+              )}
             </Button>
 
             {/* User Menu */}
-            <Avatar className="h-8 w-8 cursor-pointer">
+            <Avatar className="h-8 w-8 cursor-pointer" onClick={() => router.push('/settings')}>
               <AvatarImage src={user.avatar_url} alt={user.full_name || user.username} />
               <AvatarFallback>
                 {getInitials(user.full_name || user.username)}
