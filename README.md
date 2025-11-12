@@ -1,4 +1,4 @@
-```markdown
+
 # 🤖 AI Code Review Assistant
 
 A full-stack AI-powered code review platform that analyzes GitHub repositories for code quality, security vulnerabilities, and performance issues using advanced AI models.
