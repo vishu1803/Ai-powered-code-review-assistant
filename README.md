@@ -617,7 +617,6 @@ For support, email support@aicodereview.com or open an issue on GitHub.
 ---
 
 **Built with ❤️ using Next.js, FastAPI, and OpenAI**
-```
 
 
 
