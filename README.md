@@ -587,7 +587,7 @@ Contributions are welcome! Please follow these steps:
 
 ## 👥 Authors
 
-- **Your Name** - *Initial work* - [YourGitHub](https://github.com/vishu1803)
+- **Vishwanath Nishad** - *Initial work* - [YourGitHub](https://github.com/vishu1803)
 
 ## 🙏 Acknowledgments
 
